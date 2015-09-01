@@ -4,7 +4,7 @@ void ThreadPool::thread_handler()
 {
     while(1)
     {
-        task_type_t task;
+        std::function<void()> task;
         {
             // scoped lock
             std::unique_lock<std::mutex> lock(m_mutex);
@@ -48,24 +48,6 @@ ThreadPool::ThreadPool(size_t number_of_threads)
     for(size_t i = 0; i < number_of_threads; ++i)
     {
         m_threads.emplace_back(std::thread(thread_handler, this));
-    }
-}
-
-void ThreadPool::enqueue(task_type_t task)
-{
-    if(m_shutdown)
-    {
-        throw std::logic_error("ThreadPool is shutting down - cannot add new task.");
-    }
-    else
-    {
-        {
-            // scoped lock
-            std::unique_lock<std::mutex>(m_mutex);
-            m_tasks.push_back(task);
-        }
-
-        m_barrier.notify_one(); // notify one thread waiting for the condition to change
     }
 }
 

@@ -7,7 +7,9 @@
 #include <thread>
 #include <mutex>
 #include <condition_variable>
+#include <future>
 #include <exception>
+#include <memory>
 
 /**
  * Gives the functionality of a thread pool.
@@ -17,12 +19,10 @@
  */
 class ThreadPool
 {
-    using task_type_t = std::function<void()>;
-
     /**
      * Queue containing tasks to be processed.
      */
-    std::deque<task_type_t> m_tasks;
+    std::deque<std::function<void()>> m_tasks;
 
     /**
      * Vector containing threads in thread pool.
@@ -68,8 +68,41 @@ public:
      * Adds new task to the queue.
      *
      * @param task Task to be added.
+     * @param args Arguments for the task.
+     *
+     * @return std::future object containing
      */
-    void enqueue(task_type_t task);
+    template<typename F, typename ...Args>
+    auto enqueue(F&& task, Args&&... args) -> std::future<typename std::result_of<F(Args...)>::type>
+    {
+        using return_type = typename std::result_of<F(Args...)>::type;
+        std::future<return_type> future_result;
+
+        if(m_shutdown)
+        {
+            throw std::logic_error("ThreadPool is shutting down - cannot add new task.");
+        }
+        else
+        {
+            {
+                // scoped lock
+                std::unique_lock<std::mutex>(m_mutex);
+
+                auto packaged_task = std::make_shared<std::packaged_task<return_type()>>(
+                    std::bind(std::forward<F>(task), std::forward<Args>(args)...)
+                );
+                future_result = packaged_task->get_future();
+
+                m_tasks.push_back([packaged_task]{
+                    (*packaged_task)();
+                });
+            }
+
+            m_barrier.notify_one(); // notify one thread waiting for the condition to change
+        }
+
+        return future_result;
+    }
 
     /**
      * Shuts down the thread pool. Removes all tasks from the queue (see below).
